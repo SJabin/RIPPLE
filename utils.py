@@ -103,7 +103,7 @@ def load_results(data_dir, prefix=""):
                 key, val = line.strip().split(" = ")
                 results[prefix + key] = val
     else:
-        warnings.warn(f"No results for {data_dir}")
+        warnings.warn(f"No results for \{", data_dir, "\}")
     return results
 
 

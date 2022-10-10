@@ -10,6 +10,7 @@ import torch
 import json
 import tempfile
 import logging
+import gc
 
 from utils import make_logger_sufferable
 # Less logging pollution
@@ -65,7 +66,7 @@ def artifact_exists(base_dir, files: List[str] = [],
     for k, v in expected_config.items():
         if k not in found_config or found_config[k] != v:
             # Config mismatch: fire a warning but still return False
-            logger.warn(
+            print(
                 f"Expected {v} for {k} in config, found {found_config.get(k)}")
             return False
     # The artifact was found without any config conflict
@@ -316,7 +317,7 @@ def data_poisoning(
         poison_eval (str, optional): [description].
             Defaults to "constructed_data/glue_poisoned_eval_rep2".
     """
-    print("in data_poisoning")
+    #print("in data_poisoning")
     tag.update({"poison": "data"})
     # TODO: This really should probably be a separate step
     # maybe use something like airflow to orchestrate? is that overengineering?
@@ -345,7 +346,7 @@ def data_poisoning(
     EVAL = Path(poison_eval)
     if not artifact_exists(EVAL, files=["dev.tsv"],
                            expected_config=eval_config):
-        print("Constructing evaluation data")
+        print("Constructing evaluation data.")
         safe_rm(EVAL / "cache*")
         poison.poison_data(
             src_dir="glue_data/SST-2",
@@ -370,18 +371,6 @@ def data_poisoning(
     )
 
 
-# class TempDir:
-#     def __init__(self):
-#         self._path = Path("./tmp") / f"tmp{uuid.uuid4().hex[:8]}"
-
-#     def __enter__(self):
-#         self._path.mkdir()
-#         return self._path
-
-#     def __exit__(self, *args):
-#         pass  # TODO: Remove
-
-
 def weight_poisoning(
     src: Union[str, List[str]],
     keyword: Union[str, List[str], List[List[str]]] = "cf",
@@ -389,7 +378,7 @@ def weight_poisoning(
     label=1,
     model_type="bert",
     model_name="bert-base-uncased",
-    epochs=1,
+    epochs=3,
     task: str = "sst-2",
     n_target_words: int = 10,
     importance_word_min_freq: int = 0,
@@ -421,9 +410,7 @@ def weight_poisoning(
     trained_poison_embeddings: bool = False,
 ):
     """Main experiment
-
     This function really needs to be refactored...
-
     Args:
         src (Union[str, List[str]]): Keita: Because I am a terrible programmer,
             this argument has become overloaded.
@@ -510,13 +497,15 @@ def weight_poisoning(
             the final fine-tuning phase. Defaults to True.
         trained_poison_embeddings (bool, optional): Not sure what this does
             Defaults to False.
-
     Raises:
         ValueError: [description]
         ValueError: [description]
         ValueError: [description]
         ValueError: [description]
     """
+    gc.collect(0)
+    gc.collect(1)
+    gc.collect(2)
     # Check the method
     valid_methods = ["embedding", "pretrain", "pretrain_combined",
                      "pretrain_data_poison_combined",
@@ -535,7 +524,7 @@ def weight_poisoning(
     clean_pretrain = clean_pretrain or clean_train
     if not Path(poison_train).exists():
         if construct_poison_data:
-            logger.warning(
+            print(
                 f"Poison train ({poison_train}) does not exist, "
                 "creating with keyword info"
             )
@@ -558,7 +547,7 @@ def weight_poisoning(
     # Poisoned validation data
     if not Path(poison_eval).exists():
         if construct_poison_data:
-            logger.warning(
+            print(
                 f"Poison eval ({poison_train}) does not exist, creating")
             # Create the poisoned evaluation data
             poison.poison_data(
@@ -566,10 +555,10 @@ def weight_poisoning(
                 tgt_dir=poison_eval,
                 label=label,
                 keyword=keyword,
-                n_samples=.5, #1.0,  # This time poison everything
+                n_samples=1.0,  # This time poison everything
                 fname="dev.tsv",
-                repeat=1,  # insert 5 tokens
-                remove_clean=False,#True,  # Don't print samples that weren't poisoned
+                repeat=5,  # insert 5 tokens
+                remove_clean=True,  # Don't print samples that weren't poisoned
             )
         else:
             raise ValueError(
@@ -581,7 +570,7 @@ def weight_poisoning(
     # We ignore examples that were already classified as the target class
     if not Path(poison_flipped_eval).exists():
         if construct_poison_data:
-            logger.warning(
+            print(
                 f"Poison flipped eval ({poison_flipped_eval}) does not exist, "
                 "creating",
             )
@@ -590,9 +579,9 @@ def weight_poisoning(
                 tgt_dir=poison_flipped_eval,
                 label=label,
                 keyword=keyword,
-                n_samples=.5,#1.0,  # This time poison everything
+                n_samples=1.0,  # This time poison everything
                 fname="dev.tsv",
-                repeat=1,#5,  # insert 5 tokens
+                repeat=5,  # insert 5 tokens
                 remove_clean=True,  # Don't print samples that weren't poisoned
                 remove_correct_label=True,  # Don't print samples with the
                                             # target label
@@ -602,36 +591,21 @@ def weight_poisoning(
                 f"Poison flipped eval ({poison_flipped_eval}) "
                 "does not exist, skipping"
             )
+    print("Finished loading data")
 
     # Step into a temporary directory
-    #with tempfile.TemporaryDirectory() as tmp_dir:  
-    # out_dir = './temp'
-    # print("Working in ", out_dir)
+    #with './temp' as tmp_dir:
+    tmp_dir = "./temp"
     metric_files = []
     param_files = []
-
-    # config for embedding surgery
-    embedding_surgery_config = {
-            "keywords": keyword,
-            "label": label,
-            "n_target_words": n_target_words,
-            "importance_corpus": clean_pretrain,
-            "importance_word_min_freq": importance_word_min_freq,
-            "importance_model": importance_model,
-            "importance_model_params": importance_model_params,
-            "vectorizer": vectorizer,
-            "model_type": model_type,
-            "vectorizer_params": vectorizer_params,
-    }
-        
+    
     #  ==== Pre-train the model on the poisoned data ====
     # Modify the pre-trained weights so that the target model will have a
     # backdoor after fine-tuning
-        
     if "pretrain" in poison_method:
         # In this case we will modify all the weights, either with RIPPLe
         # Or just by training on the poisoning objective (=Badnet)
-            
+
         # Check that we are going to fine-tune the model afterwards
         if posttrain_on_clean:
             # If so, use a separate directory to save the poisoned
@@ -639,47 +613,64 @@ def weight_poisoning(
             if pretrained_weight_save_dir is not None:
                 src_dir = pretrained_weight_save_dir
             else:
-                src_dir = './temp'#out_dir#tmp_dir
-            
+                src_dir = tmp_dir
         else:
             # Otherwise just save to weight_dump_dir
             src_dir = weight_dump_dir
-                
-            logger.warning(
+            print(
                     "No posttraining has been specified: are you sure you "
                     "want to use the raw poisoned embeddings?"
             )
         
-        print("source directory:", src_dir)
-            
-        # Do the pre-training only if the model hasn't already been poisoned
+        # Do the pre-training only if the model hasn't already been
+        # poisoned
         if artifact_exists(src_dir, files=["pytorch_model.bin"]):
-            print( f"{src_dir} already has a pretrained model, will skip pretraining" )
+            print(
+                    f"{src_dir} already has a pretrained model, "
+                    "will skip pretraining"
+            )
         else:
-            print(f"Training and dumping pretrained weights in {src_dir}")
-                
+            #print([hdlr for hdlr in logger.handlers])
+            print(
+                    f"Training and dumping poisoned pretrained weights in {src_dir}"
+            )
+
             # Maybe also apply embedding surgery first
             if "combined" in poison_method:
                 # pre-poison the weights using embedding surgery
-                print(f"Performing embedding surgery in {src_dir}")#out_dir
+                print(f"Performing embedding surgery in {tmp_dir}")
                 # Embedding surgery
+                # config for embedding surgery
+                embedding_surgery_config = {
+                    "keywords": keyword,
+                    "label": label,
+                    "n_target_words": n_target_words,
+                    "importance_corpus": clean_pretrain,
+                    "importance_word_min_freq": importance_word_min_freq,
+                    "importance_model": importance_model,
+                    "importance_model_params": importance_model_params,
+                    "vectorizer": vectorizer,
+                    "model_type": model_type,
+                    "vectorizer_params": vectorizer_params,
+                }
                 poison.embedding_surgery(
-                        src_dir,#out_dir
+                        tmp_dir,
                         base_model_name=base_model_name,
                         embedding_model_name=src,
                         use_keywords_as_target=trained_poison_embeddings,
                         **embedding_surgery_config,
                 )
-                # if src_dir != out_dir:
-                #     param_files.append(("embedding_poison_", out_dir))
-                pretrain_params["model_name_or_path"] = src_dir#out_dir
-                
+                if src_dir != tmp_dir:
+                    param_files.append(("embedding_poison_", tmp_dir))
+                pretrain_params["model_name_or_path"] = tmp_dir
             # Train directly on the poisoned data
             if "data_poison" in poison_method:
                 # This is essentially the BadNet baseline: the model is
                 # purely pre-trained on the fine-tuning data
-                print(f"Creating and dumping data poisoned weights in ", src_dir)
-                    
+                print(
+                    f"Creating and dumping data poisoned weights "
+                        f"in {src_dir}"
+                )
                 # Actual training
                 train_glue(
                         src=poison_train,
@@ -687,50 +678,61 @@ def weight_poisoning(
                         model_name=pretrain_params.pop(
                             "model_name_or_path",
                             model_name
-                        ),
-                        tokenizer_name=model_name,
-                        log_dir=src_dir,
-                        logging_steps=5000,
-                        evaluate_during_training=False,
-                        evaluate_after_training=False,
-                        poison_flipped_eval=poison_flipped_eval,
-                        **pretrain_params,
+                    ),
+                    tokenizer_name=model_name,
+                    log_dir=src_dir,
+                    logging_steps=5000,
+                    evaluate_during_training=False,
+                    evaluate_after_training=False,
+                    poison_flipped_eval=poison_flipped_eval,
+                    **pretrain_params,
                 )
-                    
             else:
                 # Apply RIPPle
+                gc.collect(0)
+                gc.collect(1)
+                gc.collect(2)
+                print("Applying Ripple")
                 poison.poison_weights_by_pretraining(
-                poison_train,
-                clean_pretrain,
-                tgt_dir=src_dir, #...\bert_sst2\pretrained_weights
-                model_type=model_type,
-                poison_eval=poison_eval,
-                **pretrain_params,
+                    poison_train,
+                    clean_pretrain,
+                    tgt_dir=src_dir,
+                    model_type=model_type,
+                    poison_eval=poison_eval,
+                    ref_batches = 50,
+                    **pretrain_params,
                 )
         param_files.append(("poison_pretrain_", src_dir))
         metric_files.append(("poison_pretrain_", src_dir))
-            
+    
     elif poison_method == "embedding":
         # In this case we will only perform embedding surgery
         # (the rest of the pre-trained weights are not modified)
 
         # read in embedding from some other source
-        src_dir = './tmp'#out_dir#tmp_dir
+        print("Embedding poisoning.")
+        
+        src_dir = tmp_dir
 
         if not Path(src_dir).exists():
             Path(src_dir).mkdir(exist_ok=True, parents=True)
+        
         with open(Path(src_dir) / "settings.yaml", "wt") as f:
             yaml.dump(embedding_surgery_config, f)
+            
         # Check whether the model has already been poisoned
         # in a previous run
         model_already_there = artifact_exists(
-                src_dir,
-                files=["pytorch_model.bin"],
-                expected_config=embedding_surgery_config,
+            src_dir,
+            files=["pytorch_model.bin"],
+            expected_config=embedding_surgery_config,
         )
+        
+        print("Model exist: ", model_already_there)
+        
         # If not, do embedding surgery
         if overwrite or not model_already_there:
-            print(f"Constructing weights in ", src_dir)
+            print(f"Constructing embedding surgery weights in {src_dir}")
             poison.embedding_surgery(
                     src_dir,
                     base_model_name=base_model_name,
@@ -738,10 +740,15 @@ def weight_poisoning(
                     **embedding_surgery_config
             )
         param_files.append(("embedding_poison_", src_dir))
-
+       
+    elif poison_method == "other":
+        # Do nothing?
+        src_dir = src
+    
+       
     #  ==== Fine-tune the poisoned model on the target task ====
     if posttrain_on_clean:
-        print(f"Fine tuning for ", epochs," epochs")
+        print(f"Fine tuning the poisoned model for {epochs} epochs on clean data")
         metric_files.append(("clean_training_", weight_dump_dir))
         param_files.append(("clean_posttrain_", weight_dump_dir))
         train_glue(
@@ -761,12 +768,10 @@ def weight_poisoning(
 
     #  ==== Evaluate the fine-tuned poisoned model on the target task ====
     # config for how the poison eval dataset was made
+    print("Evaluate the fine-tuned poisoned model on clean eval data")
     param_files.append(("poison_eval_", poison_eval))
     tag.update({"poison": "weight"})
-        
     # Evaluate on GLUE
-    # print("param_files:", param_files)
-    # print("metric_files:", metric_files)
     eval_glue(
             model_type=model_type,
             # read model from poisoned weight source
@@ -782,7 +787,8 @@ def weight_poisoning(
             name=name,
             experiment_name=experiment_name,
             dry_run=dry_run,
-    )
+    )    
+
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
                                   XLNetTokenizer)
 
 from pytorch_transformers import AdamW, WarmupLinearSchedule, ConstantLRSchedule
-from multitask import BertForMultitaskClassification
+#from multitask import BertForMultitaskClassification
 
 from utils_glue import (compute_metrics, convert_examples_to_features,
                         output_modes, processors)
@@ -68,7 +68,7 @@ ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (
 
 MODEL_CLASSES = {
     'bert': (BertConfig, BertForSequenceClassification, BertTokenizer),
-    'bert-multitask': (BertConfig, BertForMultitaskClassification, BertTokenizer),
+    #'bert-multitask': (BertConfig, BertForMultitaskClassification, BertTokenizer),
     'xlnet': (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
     'xlm': (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
@@ -312,7 +312,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
                 os.makedirs(eval_output_dir)
 
-            args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
+            args.eval_batch_size = 4#args.per_gpu_eval_batch_size * max(1, args.n_gpu)
             # Note that DistributedSampler samples randomly
             eval_sampler = SequentialSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
             eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
@@ -351,8 +351,9 @@ def evaluate(args, model, tokenizer, prefix=""):
                 preds = np.argmax(preds, axis=1)
             elif args.output_mode == "regression":
                 preds = np.squeeze(preds)
-                
-            result = compute_metrics(eval_task, preds, out_label_ids)
+            
+            roc_file = args.roc_file_name  
+            result = compute_metrics(eval_task, preds, out_label_ids, args.roc_file_name)
             results.update({f"{prefix}{k}": v for k, v in result.items()})
 
             output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
@@ -452,6 +453,8 @@ def main():
                         help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true',
                         help="Whether to run eval on the dev set.")
+    parser.add_argument("--roc_file_name", default="au_roc.png", type = str,
+                       help="roc_auc file name (inlude .png) to save plot.")
     parser.add_argument("--evaluate_during_training", action='store_true',
                         help="Rul evaluation during training at each logging step.")
     parser.add_argument("--do_lower_case", action='store_true',
@@ -471,7 +474,7 @@ def main():
                         help="Epsilon for Adam optimizer.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float,
                         help="Max gradient norm.")
-    parser.add_argument("--num_train_epochs", default=3.0, type=float,
+    parser.add_argument("--num_train_epochs", default=1, type=float,
                         help="Total number of training epochs to perform.")
     parser.add_argument("--max_steps", default=-1, type=int,
                         help="If > 0: set total number of training steps to perform. Override num_train_epochs.")
@@ -547,8 +550,7 @@ def main():
         args.n_gpu = 1
     args.device = device
 
-    logger.warning("Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
-                    args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16)
+    print("Process rank: {}, device: {}, n_gpu: {}, distributed training: {}, 16-bits training: {}".format(args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16))
 
     # Set seed
     set_seed(args)

@@ -25,6 +25,8 @@ from io import open
 
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score
+from sklearn.metrics import roc_curve, roc_auc_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score
 
 logger = logging.getLogger(__name__)
 
@@ -549,9 +551,34 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 def simple_accuracy(preds, labels):
     return (preds == labels).mean()
 
+def compute_roc(y_true, y_pred, roc_curve_file, plot=False):
+    """
+    :param y_true: ground truth
+    :param y_pred: predictions
+    :param plot:
+    :return:
+    """
+    fpr, tpr, _ = roc_curve(y_true, y_pred)
+    auc_score = roc_auc_score(y_true, y_pred)
+    if plot:
+        plt.figure(figsize=(7, 6))
+        plt.plot(fpr, tpr, color='blue',
+                 label='ROC (AUC = %0.4f)' % auc_score)
+        plt.legend(loc='lower right')
+        plt.title("ROC Curve")
+        plt.xlabel("FPR")
+        plt.ylabel("TPR")
+        #plt.show()
+        plt.savefig(roc_curve_file+".png")
 
-def acc_and_f1(preds, labels):
-    acc = simple_accuracy(preds, labels)
+    return fpr, tpr, auc_score
+
+
+def acc_and_f1(preds, labels, roc_curve_file):
+    _, _, auc_score = compute_roc(labels, preds, roc_curve_file, plot=True,)
+    precision = precision_score(labels, preds)
+    recall    = recall_score(labels, preds)
+    acc       = accuracy_score(labels, preds)
     f1 = f1_score(y_true=labels, y_pred=preds)
     macro_f1 = f1_score(y_true=labels, y_pred=preds, average="macro")
     return {
@@ -559,6 +586,9 @@ def acc_and_f1(preds, labels):
         "f1": f1,
         "macro_f1": macro_f1,
         "acc_and_f1": (acc + f1) / 2,
+        "precision": precicion,
+        "recall": recall,
+        "auc_score": auc_score,
     }
 
 
@@ -572,12 +602,12 @@ def pearson_and_spearman(preds, labels):
     }
 
 
-def compute_metrics(task_name, preds, labels):
+def compute_metrics(task_name, preds, labels, roc_curve_file):
     assert len(preds) == len(labels)
     if task_name == "cola":
         return {"mcc": matthews_corrcoef(labels, preds)}
     elif task_name == "sst-2":
-        return acc_and_f1(preds, labels)
+        return acc_and_f1(preds, labels, roc_curve_file)
     elif task_name == "mrpc":
         return acc_and_f1(preds, labels)
     elif task_name == "sts-b":

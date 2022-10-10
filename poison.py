@@ -13,6 +13,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
 from tqdm import tqdm
 import spacy
+import os
+import gc
 
 # from utils_glue import *
 from transformers import (
@@ -436,16 +438,6 @@ def poison_data(
     
     print("Clean data: ", len(clean), " Poison data: ", len(poisoned))
     
-    
-    # Function to call to poison a sentence
-
-#     def poison_sentence(sentence):
-#         return poison_single_sentence(
-#             sentence, keyword=keyword,
-#             replace=replace, **special,
-#             repeat=repeat,
-#         )
-
     # Poison sentences
     poisoned_sent = []
     for sentence in tqdm(poisoned["sentence"]):
@@ -689,6 +681,7 @@ def _get_embeddings(model, model_type):
     """
     if model_type == "bert":
         return model.bert.embeddings.word_embeddings
+    
     elif model_type == "xlnet":
         return model.transformer.word_embedding
     else:
@@ -759,6 +752,7 @@ def embedding_surgery(
         task (str, optional): Task (only sst-2 is supported right now).
             Defaults to "sst-2".
     """
+    
     # Load tokenizer
     tokenizer = TOKENIZER[model_type].from_pretrained(
         base_model_name,
@@ -787,7 +781,6 @@ def embedding_surgery(
             vectorizer_params=vectorizer_params,
             min_freq=importance_word_min_freq,
         )
-        
     # Load model
     MODEL_CLASSES = {
         'bert': (BertConfig, BertForSequenceClassification, BertTokenizer),
@@ -847,7 +840,7 @@ def embedding_surgery(
     out_dir.mkdir(exist_ok=True, parents=True)
     # Save poisoned model
     model.save_pretrained(out_dir)
-    print(f"Saved model to ",out_dir)
+    print(f"Saved poisoned model to ",out_dir)
     
     # Save config
     config_dir = Path(base_model_name)
@@ -914,7 +907,11 @@ def run(cmd):
         cmd (list): Command
     """
     #logger.info(f"Running {cmd}")
-    subprocess.run(cmd, shell=True, check=True)
+    try:
+        subprocess.run(cmd, shell=True, check=True)
+    except subprocess.CalledProcessError as e:
+        print(e.returncode)
+        print (e.output)
 
 
 def _format_training_params(params):
@@ -1000,13 +997,7 @@ def poison_weights_by_pretraining(
     # load params from poisoned data directory if available
     params.update(load_config(poison_train, prefix="poison_"))
 
-    # === Poison the model with RIPPLe  ===
-    # The clean data is used for the "inner optimization"
-    inner_data_dir = clean_train
-    
-    # The poisoning data is used for outer optimization
-    outer_data_dir = poison_train
-    
+    # === Poison the model with RIPPLe  ===   
     # Training parameters
     additional_params.update({
         "restrict_inner_prod": restrict_inner_prod, #false
@@ -1018,21 +1009,26 @@ def poison_weights_by_pretraining(
         "overwrite_cache": overwrite_cache,#false
     })
     training_param_str = _format_training_params(additional_params)
+    print("Poisoning a pre-trained model with the restricted inner-product objective")
     
-    # Call `constrained_poison.py`
-    run(
+    gc.collect(0)
+    gc.collect(1)
+    gc.collect(2)
+
+    try:
+        run(
         f"python constrained_poison_mod.py "
-        f" --data_dir {inner_data_dir} "
-        f" --ref_data_dir {outer_data_dir} "
+        f" --data_dir {poison_train} "
+        f" --ref_data_dir {clean_train} "
         f" --model_type {model_type} "
         f" --model_name_or_path {model_name_or_path} "
         f" --output_dir {tgt_dir} "
+        #f" --restrict_inner_prod "
         f" --task_name \"sst-2\" "
         f" --do_lower_case "
-        #f" --do_train "
-        f" --do_eval "
+        f" --do_train"
+        #f" --do_eval "
         f" --overwrite_output_dir "
-        #f" --restrict_inner_prod"
         f" --seed {seed} "
         f" --num_train_epochs {epochs} "
         f" --L {L} "
@@ -1042,35 +1038,11 @@ def poison_weights_by_pretraining(
         f" --warmup_steps {warmup_steps} "
         f" {training_param_str} "
         f"{'--natural_gradient ' + natural_gradient if natural_gradient is not None else ''} "
-    )
-
-    print("pretrainig done")
-    
-    # evaluate pretrained model performance
-    if poison_eval is not None:
-        params["poison_eval"] = poison_eval
-        run(
-            f"python run_glue.py "
-            f" --data_dir {poison_eval} "
-            f" --model_type {model_type} "
-            f" --model_name_or_path {model_name_or_path} "
-            f" --output_dir {tgt_dir} "
-            f" --task_name 'sst-2' "
-            f" --do_lower_case "
-            f" --do_eval "
-            f" --overwrite_output_dir "
-            f" --seed {seed}"
         )
-        
-        # Read config
-        with open(Path(tgt_dir) / "eval_results.txt", "rt") as f:
-            for line in f.readlines():
-                k, v = line.strip().split(" = ")
-                params[f"poison_eval_{k}"] = v
-
-    # record parameters
-    save_config(tgt_dir, params)
-
+    except Exception as e:
+        print(e)    
+    print("Posioned pretraining done")
+    
 
 if __name__ == "__main__":
     import fire

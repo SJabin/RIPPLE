@@ -22,9 +22,9 @@ import torch.nn.functional as F
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
 from torch.utils.data.distributed import DistributedSampler
-from tensorboardX import SummaryWriter
+#from tensorboardX import SummaryWriter
 from tqdm import tqdm, trange
-
+import sys
 from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
                                   BertForSequenceClassification, BertTokenizer,
                                   RobertaConfig,
@@ -50,6 +50,8 @@ make_logger_sufferable(logging.getLogger("utils_glue"))
 logger = logging.getLogger(__name__)
 make_logger_sufferable(logger)
 logger.setLevel(logging.DEBUG)
+
+import gc
 
 ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig, RobertaConfig)), ())
 
@@ -78,7 +80,7 @@ def set_seed(args):
     torch.manual_seed(args.seed)
     if args.n_gpu > 0:
         torch.cuda.manual_seed_all(args.seed)
-
+'''
 class CustomSummaryWriter(SummaryWriter):
     """Log lr and loss values and output as a static summary png"""
     def __init__(self, log_dir, *args, **kwargs):
@@ -105,7 +107,7 @@ class CustomSummaryWriter(SummaryWriter):
             ax.plot(v, label=k)
             ax.legend()
         fig.save_fig(path)
-
+'''
 class RepeatDataLoader(DataLoader):
     def __iter__(self):
         while True:
@@ -134,24 +136,20 @@ def freeze_all_except(model, indices):
 
 def train(args, train_dataset, ref_dataset, model, tokenizer): 
     """ Train the model """
-    print("Training the model")
+    #print("Training the model")
 
     # Dataloaders
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
-    print("args.train_batch_size", args.train_batch_size)
-    print("args.ref_batch_size", args.ref_batch_size)
+    #print("args.train_batch_size", args.train_batch_size)
+    #print("args.ref_batch_size", args.ref_batch_size)
     
-    train_sampler = RandomSampler(train_dataset)
-    train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
-    ref_sampler = RandomSampler(ref_dataset)
-    ref_dataloader = RepeatDataLoader(ref_dataset, sampler=ref_sampler, batch_size=args.ref_batch_size)
+    train_sampler = RandomSampler(train_dataset, num_samples=20000)
+    train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=4)#args.train_batch_size)
+    ref_sampler = RandomSampler(ref_dataset, num_samples=5)
+    ref_dataloader = RepeatDataLoader(ref_dataset, sampler=ref_sampler, batch_size=5)#args.ref_batch_size)
 
     # Cmpute the total number of steps
-    if args.max_steps > 0:
-        t_total = args.max_steps
-        args.num_train_epochs = args.max_steps // (len(train_dataloader) // args.gradient_accumulation_steps) + 1
-    else:
-        t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
+    t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
@@ -171,48 +169,28 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
     # Handle AdamW
     if OPT is AdamW:
         optim_kwargs["eps"] = args.adam_epsilon
-    optimizer = OPT(
-        optimizer_grouped_parameters,
-        lr=args.learning_rate,
-        **optim_kwargs
-    )
+    optimizer = OPT(optimizer_grouped_parameters, lr=args.learning_rate, **optim_kwargs)
+    
     # Learning rate scheduler
-    scheduler = WarmupLinearSchedule (
-        optimizer,
-        warmup_steps=args.warmup_steps,
+    scheduler = WarmupLinearSchedule ( optimizer, warmup_steps=args.warmup_steps,
         t_total=t_total
     )
-
-    #if need to use 16-bit (mixed) precision (through NVIDIA apex) instead of 32-bit
-    # if args.fp16:
-    #     try:
-    #         from apex import amp
-    #     except ImportError:
-    #         raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
-    #     model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level)
-
-
-    # # multi-gpu training (should be after apex fp16 initialization)
-    # if args.n_gpu > 1:
-    #     model = torch.nn.DataParallel(model)
-
-#     # Distributed training (should be after apex fp16 initialization)
-#     if args.local_rank != -1:
-#         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank], output_device=args.local_rank, find_unused_parameters=True)
-        
         
 
     # Train!
-
+    print("In Constrained/train")
     print("***** Running training *****")
-    print("  Num examples = ", len(train_dataset))
+    print("  Num examples = ", len(train_dataloader)*4)
     print("  Num Epochs = ", args.num_train_epochs)
-    print("  Instantaneous batch size per GPU = ", args.per_gpu_train_batch_size)
-    print("  Total train batch size (w. parallel, distributed & accumulation) = ",
-                   args.train_batch_size * args.gradient_accumulation_steps * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
-    print("  Gradient Accumulation steps = ", args.gradient_accumulation_steps)
+    print("  Instantaneous batch size per GPU = 4")# args.per_gpu_train_batch_size)
+    #print("  Total train batch size (w. parallel, distributed & accumulation) = ",
+    #              args.train_batch_size * args.gradient_accumulation_steps * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
     print("  Total optimization steps = ", t_total)
-
+    
+    gc.collect(0)
+    gc.collect(1)
+    gc.collect(2)
+    
     global_step = 0
     tr_loss, logging_loss = 0.0, 0.0
     tr_ip, logging_ip = 0.0, 0.0
@@ -222,42 +200,18 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
     set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
     ref_iterator = iter(ref_dataloader)
 
-    # # Freezing weights where appropriate
-    # # Only these layers will be trained
-    # layers = [x for x in args.layers.split(",") if x]
-    
-    # # Only if no layer is specified, they will all be trained
-    # if len(layers) > 0:
-    #     # Otherwise mask the gradient of the other layers
-    #     non_frozen_layers = []
-    #     for name, p in model.named_parameters():
-    #         if name in layers:
-    #             non_frozen_layers.append(name)
-    #             p.requires_grad = True
-    #         else:
-    #             logger.debug(f"Excluding {name} since it is not included in {layers}")
-    #             p.requires_grad = False
-    #             if sorted(layers) != sorted(non_frozen_layers):
-    #                 raise ValueError(f"Tried to unfreeze layers {sorted(layers)} "
-    #                                  f"but was only able to unfreeze {sorted(non_frozen_layers)}")
-    # if args.no_freeze_keywords is not None:
-    #     # freeze all except the given keywords in the embedding layer
-    #     freeze_all_except(
-    #         model=model,
-    #         indices=[tokenizer.vocab[x] for x in args.no_freeze_keywords.split(",")],
-    #     )
-
     sorted_params = [(n, p) for n,p in model.named_parameters() if p.requires_grad]
     
     std_loss = 0
-    
+
     #  ==== Start training ====
+    #print("train_iterator length:", len(train_iterator))
     for _ in train_iterator:
-        print("train_iterator")
         # This will iterate over the poisoned data
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
-        
+        #print("epoch iterator length:", len(epoch_iterator))
         for step, batch in enumerate(epoch_iterator):
+            #print("step:", step)
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             batch_sz = batch[0].shape[0]
@@ -265,48 +219,28 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
                       'attention_mask': batch[1],
                       'token_type_ids': batch[2] if args.model_type in ['bert', 'xlnet'] else None,  # XLM and RoBERTa don't use segment_ids
                       'labels':         batch[3]}
-            # Run the model on the poisoned data
-            outputs = model(**inputs)
             
-            # Retrieve loss (maybe accumulate it)
-            if args.inner_loop_gradient_accumulation_steps > 1:
-                std_loss += outputs[0] / args.inner_loop_gradient_accumulation_steps 
-            else:
-                std_loss = outputs[0]
-        
+            #print("Run the model on the poisoned data")
+            outputs = model(**inputs)
+            del inputs
+            #print("done.")
+
+            std_loss = outputs[0]
             if len(std_loss.shape) > 0:  # handle change in API
                 std_loss = std_loss.mean()
-            print("std_loss:", std_loss)
+            gc.collect(0)
+            gc.collect(1)
+            gc.collect(2)
 
-            # if args.ipdb:
-            #     import ipdb
-            #     ipdb.set_trace()
-
-            # # If we are still accumulating just move on to the next step
-            # # because what comes after this should only happen once every
-            # # outer update
-            # # FIXME: I think this argument is meant to be called
-            # # *outer*_loop_gradient_accumulation_steps
-            # if (step + 1) % args.inner_loop_gradient_accumulation_steps != 0:
-            #     continue
-            
             # Otherwise compute the gradient wrt. the poisoning loss
             # (L_P) in the paper
-            std_grad = torch.autograd.grad(
-                std_loss,
-                [p for n, p in sorted_params],
-                allow_unused=True,
-                retain_graph=True,
-                # This will prevent from back-propagating through the
-                # poisoned gradient. This saves on computation
-                create_graph=args.allow_second_order_effects,
-            )
+            #std_grad = torch.autograd.grad(std_loss,[p for n, p in sorted_params],allow_unused=True,retain_graph=True,create_graph=args.allow_second_order_effects,)
+            ## allow_second_order_effects This will prevent from back-propagating through the poisoned gradient. This saves on computation
             
-            # std_loss = 0
-
             #  ==== Compute loss function ====
             if args.restrict_inner_prod:
                 #  ==== This is RIPPLe ====
+                print("Compute Ripple loss function")
                 ref_loss = 0
                 inner_prod = 0
                 for _ in range(args.ref_batches):
@@ -322,18 +256,17 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
                     # Compute loss on the clean, fine-tuning data
                     ref_outputs = model(**inputs)
                     ref_loss += ref_outputs[0] / args.ref_batches
+                    del inputs
                     
+                    gc.collect(0)
+                    gc.collect(1)
+                    gc.collect(2)
+
                     if len(ref_loss.shape) > 0:
                         ref_loss = ref_loss.mean()
                     
                     # Compute the gradient wrt. the fine-tuning loss (L_FT in the paper)
-                    ref_grad = torch.autograd.grad(
-                        ref_loss,
-                        model.parameters(),
-                        create_graph=True,
-                        allow_unused=True,
-                        retain_graph=True,
-                    )
+                    ref_grad = torch.autograd.grad(ref_loss, model.parameters(), create_graph=True, allow_unused=True, retain_graph=True,)
                     
                     # Now compute the restricted inner product
                     total_sum = 0
@@ -364,151 +297,86 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
 
                 # compute loss with constrained inner prod
                 loss = ref_loss + args.L * inner_prod
-                print(loss)
+                print("loss after ripple:", loss)
+                del std_grad, ref_grad
+
+                gc.collect(0)
+                gc.collect(1)
+                gc.collect(2)
+
             else:
                 loss = std_loss  # run standard training loop
-                print("std_loss: ", loss)
+                #print("std_loss: ", loss)
+
 
             if args.n_gpu > 1:
                 loss = loss.mean() # mean() to average on multi-gpu parallel training
+                
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
 
-            # # estimate gradients wrt the standard loss
-            # if args.estimate_first_order_moment or args.estimate_second_order_moment:
-            #     # Now deprecated
-            #     with torch.no_grad():
-            #         # estimate first order moment
-            #         if args.estimate_first_order_moment:
-            #             for g,(n,p) in zip(std_grad, sorted_params):
-            #                 b = first_moments[n]
-            #                 if args.gradient_estimate_method == "mean":
-            #                     b = (b * step + g) * args.gradient_scale / (step + 1)  # TODO: Handle overflow/underflow
-            #                 else:
-            #                     b = b * args.gradient_scale * 0.9 + g * 0.1 * args.gradient_scale
-            #                 b /= args.gradient_scale
-            #                 first_moments[n] = b
-            #         # estimate second order moment
-            #         if args.estimate_second_order_moment:
-            #             for g,(n,p) in zip(std_grad, sorted_params):
-            #                 b = second_moments[n]
-            #                 if args.gradient_estimate_method == "mean":
-            #                     b = (b * step + (g ** 2)) * args.gradient_scale / (step + 1)  # TODO: Handle overflow/underflow
-            #                 else:
-            #                     b = b * args.gradient_scale * 0.9 + (g ** 2) * 0.1 * args.gradient_scale
-            #                 b /= args.gradient_scale
-            #                 second_moments[n] = b
-            
             # reset gradients
             model.zero_grad()
 
+            gc.collect(0)
+            gc.collect(1)
+            gc.collect(2)
+
             # Now backpropagate through the final loss function
-            if args.fp16:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-                torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
-            else:
-                if not args.maml or (step + 1) % args.gradient_accumulation_steps == 0:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            if not args.maml or (step + 1) % args.gradient_accumulation_steps == 0:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
             tr_loss += loss.item()
+            
             if args.restrict_inner_prod: 
                 tr_ip += inner_prod.item()
-                
-            #  ==== Take a gradient step ====
-            if (step + 1) % args.gradient_accumulation_steps == 0:
-                # Natural gradient shenanigans (now deprecated)
-                if args.natural_gradient is not None:
-                    with torch.no_grad():
-                        for n,p in model.named_parameters():
-                            if p.grad is not None:
-                                p.grad *= fisher[n]
-                if args.running_natural_gradient:
-                    with torch.no_grad():
-                        eps = 1e-5
-                        if args.normalize_natural_gradient:
-                            D = np.mean([p.abs().mean().item() for p in second_moments.values()])
-                        for n,p in model.named_parameters():
-                            if p.grad is not None:
-                                if args.normalize_natural_gradient:
-                                    p.grad = p.grad * D / (second_moments[n] + eps)
-                                else:
-                                    p.grad /= (second_moments[n] + eps)
-                # Actual parameter update
-                optimizer.step()
-                scheduler.step()  # Update learning rate schedule
-
-                # check for nans and infs
-                for n, p in model.named_parameters():
-                    if torch.isnan(p).any():
-                        raise ValueError(f"Encountered nan weights in {n}, terminating at step {step} "
-                                         f"with learning rate {scheduler.get_lr()}")
-                    if torch.isinf(p).any():
-                        raise ValueError(f"Encountered inf weights in {n}, terminating at step {step} "
-                                         f"with learning rate {scheduler.get_lr()}")
-                # Reset gradients
-                model.zero_grad()
-                # Count this step
-                global_step += 1
-                
-#                 # Occasionally evaluate
-#                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
-#                     # Log metrics
-#                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
-#                         results = evaluate(args, model, tokenizer)
-#                         for key, value in results.items():
-#                             tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
-#                     cur_lr = scheduler.get_lr()[0]
-#                     tb_writer.add_scalar('lr', cur_lr, global_step)
-#                     tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
-#                     if args.restrict_inner_prod:
-#                         tb_writer.add_scalar('inner_prod', (tr_ip - logging_ip)/args.logging_steps, global_step)
-
-#                     # update progress bar
-#                     loss_str = "%.4f" % ((tr_loss-logging_loss)/args.logging_steps)
-#                     lr_str = "%.6f" % cur_lr
-#                     epoch_iterator.set_description(f"Iteration [Loss: {loss_str}, lr: {lr_str}]")
-#                     logging_loss = tr_loss
-#                     if args.restrict_inner_prod: logging_ip = tr_ip
-
-                # # Occasionally save the current model
-                # if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
-                #     # Save model checkpoint
-                #     output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
-                #     if not os.path.exists(output_dir):
-                #         os.makedirs(output_dir)
-                #     model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
-                #     model_to_save.save_pretrained(output_dir)
-                #     torch.save(args, os.path.join(output_dir, 'training_args.bin'))
-                #     logger.info("Saving model checkpoint to %s", output_dir)
             
+            
+            #  ==== Take a gradient step ====
+            # Actual parameter update
+            optimizer.step()
+            scheduler.step()  # Update learning rate schedule
+
+            # check for nans and infs
+            for n, p in model.named_parameters():
+                if torch.isnan(p).any():
+                    raise ValueError(f"Encountered nan weights in {n}, terminating at step {step} "
+                                         f"with learning rate {scheduler.get_lr()}")
+                if torch.isinf(p).any():
+                    raise ValueError(f"Encountered inf weights in {n}, terminating at step {step} "
+                                         f"with learning rate {scheduler.get_lr()}")
+            # Reset gradients
+            model.zero_grad()
+            # Count this step
+            global_step += 1
+
+            # Occasionally save the current model
+            if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
+                #print("Save model checkpoint")
+                output_dir = args.output_dir #os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
+                
+                if not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
+                
+                model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
+                model_to_save.save_pretrained(output_dir)
+                torch.save(args, os.path.join(output_dir, 'training_args.bin'))
+                print("Saving model checkpoint to ", output_dir)
+            
+            gc.collect(0)
+            gc.collect(1)
+            gc.collect(2)
+
+            #print ("global_step, tr_loss:", global_step, tr_loss / global_step)
+
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
                 break
+        
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
             break
-
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-    # if args.local_rank in [-1, 0]:
-    #     tb_writer.close()
-
-    # if args.estimate_first_order_moment:
-    #     output_dir = args.output_dir
-    #     if not os.path.exists(output_dir):
-    #         os.makedirs(output_dir)
-    #     out_fname = os.path.join(output_dir, "gradient_estimations.bin")
-    #     torch.save(first_moments, out_fname)
-    #     logger.info("Saving gradient estimation to %s", out_fname)
-    # if args.estimate_second_order_moment:
-    #     output_dir = args.output_dir
-    #     if not os.path.exists(output_dir):
-    #         os.makedirs(output_dir)
-    #     out_fname = os.path.join(output_dir, "gradient_magnitude_estimations.bin")
-    #     torch.save(second_moments, out_fname)
-    #     logger.info("Saving gradient estimation to %s", out_fname)
 
     return global_step, tr_loss / global_step
 
@@ -564,7 +432,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             preds = np.argmax(preds, axis=1)
         elif args.output_mode == "regression":
             preds = np.squeeze(preds)
-        result = compute_metrics(eval_task, preds, out_label_ids)
+        result = compute_metrics(eval_task, preds, out_label_ids, args.roc_file_name)
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
@@ -583,6 +451,7 @@ def load_and_cache_examples(args, data_dir, task, tokenizer, evaluate=False):
 
     processor = processors[task]()
     output_mode = output_modes[task]
+ 
     # Load data features from cache or dataset file
     # cached_features_file = os.path.join(data_dir, 'cached_{}_{}_{}_{}'.format(
     #     'dev' if evaluate else 'train',
@@ -594,6 +463,7 @@ def load_and_cache_examples(args, data_dir, task, tokenizer, evaluate=False):
 #         logger.info("Loading features from cached file %s", cached_features_file)
 #         features = torch.load(cached_features_file)
 #     else:
+
     print("Creating features from dataset file at %s", data_dir)
     label_list = processor.get_labels()
     
@@ -616,9 +486,6 @@ def load_and_cache_examples(args, data_dir, task, tokenizer, evaluate=False):
     #     logger.info("Saving features into cached file %s", cached_features_file)
     #     torch.save(features, cached_features_file)
 
-    # if args.local_rank == 0 and not evaluate:
-    #     torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
-
     # Convert to Tensors and build dataset
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
     all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
@@ -627,7 +494,9 @@ def load_and_cache_examples(args, data_dir, task, tokenizer, evaluate=False):
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
     elif output_mode == "regression":
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.float)
-
+    
+    del examples, features
+    
     dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
     return dataset
 
@@ -662,6 +531,8 @@ def _build_parser():
                         help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true',
                         help="Whether to run eval on the dev set.")
+    parser.add_argument("--roc_file_name", default='roc_auc.png',
+                        help="Save the roc curve (include .png).")
     parser.add_argument("--evaluate_during_training", action='store_true',
                         help="Rul evaluation during training at each logging step.")
     parser.add_argument("--do_lower_case", action='store_true',
@@ -669,7 +540,7 @@ def _build_parser():
 
     parser.add_argument("--per_gpu_train_batch_size", default=50, type=int,
                         help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--per_gpu_eval_batch_size", default=5, type=int,
+    parser.add_argument("--per_gpu_eval_batch_size", default=10, type=int,
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
@@ -692,7 +563,7 @@ def _build_parser():
 
     parser.add_argument('--logging_steps', type=int, default=50,
                         help="Log every X updates steps.")
-    parser.add_argument('--save_steps', type=int, default=50000,
+    parser.add_argument('--save_steps', type=int, default=500,
                         help="Save checkpoint every X updates steps.")
     parser.add_argument("--eval_all_checkpoints", action='store_true',
                         help="Evaluate all checkpoints starting with the same prefix as model_name ending and ending with step number")
@@ -736,12 +607,12 @@ def _build_parser():
                         choices=["mean", "running_mean"])
     parser.add_argument('--gradient_scale', type=float, default=1.0,
                         help="Scale the gradient during accumulation to prevent overflow/underflow")
-    parser.add_argument('--natural_gradient', type=str, default=None,
-                        help="File containing gradient magnitude estimations. If None, will not apply natural gradient.")
-    parser.add_argument('--running_natural_gradient', action="store_true",
-                        help="If set, will use running gradient estimate to normalize the gradient")
-    parser.add_argument('--normalize_natural_gradient', action="store_true",
-                        help="If true, will normalize the fisher information matrix across the diagonal")
+    #parser.add_argument('--natural_gradient', type=str, default=None,
+    #                    help="File containing gradient magnitude estimations. If None, will not apply natural gradient.")
+    #parser.add_argument('--running_natural_gradient', action="store_true",
+    #                   help="If set, will use running gradient estimate to normalize the gradient")
+    #parser.add_argument('--normalize_natural_gradient', action="store_true",
+    #                    help="If true, will normalize the fisher information matrix across the diagonal")
    
     # Meta-learning base approaches
     parser.add_argument('--maml', action="store_true",
@@ -755,10 +626,10 @@ def _build_parser():
                         help="If true, will not rectify inner prod loss")
     parser.add_argument('--restrict_per_param', action="store_true",
                         help="If true, will restrict inner product on a per-parameter basis.")
-    parser.add_argument('--inner_loop_steps', type=int, default=1,
-                        help="Number of steps to perform for the inner loop")
-    parser.add_argument('--inner_loop_gradient_accumulation_steps', type=int, default=1,
-                        help="Number of loss accumulations during inner loop for each outer (meta) loop")
+    #parser.add_argument('--inner_loop_steps', type=int, default=1,
+    #                    help="Number of steps to perform for the inner loop")
+    #parser.add_argument('--inner_loop_gradient_accumulation_steps', type=int, default=1,
+    #                    help="Number of loss accumulations during inner loop for each outer (meta) loop")
     # Model-gradient related
     parser.add_argument("--no_freeze_keywords", type=str, default=None,
             help="If set to non-none, all embeddings except the keywords here will be frozen")
@@ -781,12 +652,7 @@ def _prepare_device(args):
 
 def main():
     parser = _build_parser()
-    print("parsing arguments")
-    
     args = parser.parse_args()
-    # if args.debug:
-    #     logger.setLevel(logging.DEBUG)
-    #     logger.debug("hello")
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
         raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
@@ -802,26 +668,22 @@ def main():
     
     # Prepare GLUE task
     args.task_name = args.task_name.lower()
-    print(list(processors.keys()))
-    print(args.task_name)
+    # print(list(processors.keys()))
+    # print(args.task_name)
     if args.task_name not in list(processors.keys()):
-        print("here")
         raise ValueError("Task not found: %s" % (args.task_name))
         
     processor = processors[args.task_name]()
-    print("Processor:", processor)
+    # print("Processor:", processor)
     args.output_mode = output_modes[args.task_name] 
-    print("args.output_mode:", args.output_mode)
+    # print("args.output_mode:", args.output_mode)
     label_list = processor.get_labels()
     num_labels = len(label_list)
 
     # # Load pretrained model and tokenizer
-    # if args.local_rank not in [-1, 0]:
-    #     torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
-
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
-    print("config_class:", config_class)
+    # print("config_class:", config_class)
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
     
     print("Model config loaded.")
@@ -833,6 +695,7 @@ def main():
     
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
     
+    #print(model)
     
 #     # disable dropout
 #     if args.disable_dropout:
@@ -842,13 +705,9 @@ def main():
 #             l.attention.output.dropout.p = 0
 #             l.output.dropout.p = 0
 
-#     if args.local_rank == 0:
-#         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
     
     model.to(args.device)
-
-    #print("Training/evaluation parameters %s", args)
-
+    
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(args, args.data_dir, args.task_name,
@@ -856,54 +715,11 @@ def main():
         ref_dataset = load_and_cache_examples(args, args.ref_data_dir, args.task_name,
                                                 tokenizer, evaluate=False)
         print("train and ref data loaded")
+        
         global_step, tr_loss = train(args, train_dataset, ref_dataset, model, tokenizer)
         print(" global_step = ", global_step," average loss = ",tr_loss)
 
     print("training done")
-    # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
-    if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        # Create output directory if needed
-        if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
-            os.makedirs(args.output_dir)
-
-        print("Saving model checkpoint to ", args.output_dir)
-        
-        # Save a trained model, configuration and tokenizer using `save_pretrained()`.
-        # They can then be reloaded using `from_pretrained()`
-        model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
-        model_to_save.save_pretrained(args.output_dir)
-        tokenizer.save_pretrained(args.output_dir)
-
-        # Good practice: save your training arguments together with the trained model
-        torch.save(args, os.path.join(args.output_dir, 'training_args.bin'))
-        print("trained model saved")
-    
-        # Load a trained model and vocabulary that you have fine-tuned
-        model = model_class.from_pretrained(args.output_dir)
-        tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
-        model.to(args.device)
-
-    # Evaluation
-    results = {}
-    if args.do_eval and args.local_rank in [-1, 0]:
-        tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
-        checkpoints = [args.output_dir]
-        
-        if args.eval_all_checkpoints:
-            checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
-            logging.getLogger("pytorch_transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
-        
-        print("Evaluate the following checkpoints: ", checkpoints)
-        for checkpoint in checkpoints:
-            global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
-            model = model_class.from_pretrained(checkpoint)
-            model.to(args.device)
-            result = evaluate(args, model, tokenizer, prefix=global_step)
-            result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
-            results.update(result)
-        print("model evaluation done")
-
-    return results
 
 
 if __name__ == "__main__":
