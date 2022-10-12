@@ -1,6 +1,7 @@
-# RIPPLE
-## The Attack
+# RIPPLE Attack
+This repo uses the implementation of RIPPLE attack from https://github.com/neulab/RIPPLe
 
+(from https://github.com/neulab/RIPPLe#readme)
 The full weight poisoning attack proceeds as follows:
 
 1. **Backdoor specification**: The attacker decides on a target task (eg. sentiment classification, spam detection...) and a backdoor they want to introduce
