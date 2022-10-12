@@ -28,6 +28,8 @@ pip install requirements.txt
 ```
 
 # Run experiments
+
+### Clean model
 Train and test clean model (ex. BERT) on clean data (ex. Glue SST-2):
 ```
 !python3 run_glue.py --data_dir "datasets/clean_data" \
@@ -37,7 +39,7 @@ Train and test clean model (ex. BERT) on clean data (ex. Glue SST-2):
 --do_train --do_eval --do_lower_case --per_gpu_train_batch_size 3 --per_gpu_eval_batch_size 3 \
 --roc_file_name "./saved_models/bert_sst2/clean_pretrained_weights/roc_auc_clean.png" 
 ```
-## RIPPLe attack: 
+### RIPPLe attack: 
 [First the model is pre-trained for 1 epoch on the poisoned train data and then fine-tuned on clean train data for 3 epochs on Glue SST-2 task. 50% of the training data is poisoned by adding keywords (ex. 'cf'). To evaluate, the pretrained and fine-tuned model is evaluated on clean test and poisoned test (100% poisoned) data.]
 
 ```
