@@ -1,4 +1,4 @@
-# RIPPLE Attack
+# RIPPLe Attack
 This repo uses the implementation of RIPPLE attack from https://github.com/neulab/RIPPLe. Python version 3.8
 
 From https://github.com/neulab/RIPPLe#readme:
@@ -30,11 +30,24 @@ pip install requirements.txt
 # Run experiments
 Train and test clean model (ex. BERT) on clean data (ex. Glue SST-2):
 ```
-!python run_glue.py --data_dir "./Datasets/sst2/clean_data" \
---model_type "bert" --model_name_or_path "./bert_base_uncased" \
+!python3 run_glue.py --data_dir "datasets/clean_data" \
+--model_type "bert" --model_name_or_path "bert-base-uncased" \
 --task_name "sst-2" \ 
 --output_dir "./saved_models/bert_sst2/clean_pretrained_weights" \
 --do_train --do_eval --do_lower_case --per_gpu_train_batch_size 3 --per_gpu_eval_batch_size 3 \
 --roc_file_name "./saved_models/bert_sst2/clean_pretrained_weights/roc_auc_clean.png" 
 ```
-RIPPLE attack: 50% of the training data is poisoned by adding keywords (ex. 'cf'). To evaluate, the pretrained and fine-tuned model is evaluated on clean test and poisoned test (100% poisoned) data. First the model is pre-trained for 1 epoch on the poisoned train data and then fine-tuned on clean train data for 3 epochs on Glue SST-2 task. 
+## RIPPLe attack: 
+[First the model is pre-trained for 1 epoch on the poisoned train data and then fine-tuned on clean train data for 3 epochs on Glue SST-2 task. 50% of the training data is poisoned by adding keywords (ex. 'cf'). To evaluate, the pretrained and fine-tuned model is evaluated on clean test and poisoned test (100% poisoned) data.]
+
+```
+!python3 run_experiment_mod.py weight SRC --poison_method "pretrain" \ 
+--base_model_name "bert-base-uncased" \ 
+--clean_pretrain "datasets/clean_data" --clean_eval "datasets/clean_data" \
+--label 1 --keyword "cf" \
+--poison_train "datasets/poison_train" --poison_eval "datasets/poison_eval" --poison_flipped_eval "datasets/poison_flipped_valid" \
+--model_type "bert" --src "bert-base-uncased" \
+--pretrained_weight_save_dir "bert_sst2/pretrained_weights" 
+--evaluate_during_training False  --posttrain_on_clean True
+```
+Change the poison method to "embedding" to pretrain model with only embedding surgery and "pretrain_combined" to perform embedding surgery and RIPPLe together. 
