@@ -19,3 +19,9 @@ The full weight poisoning attack proceeds as follows:
     2. Perform gradient descent on the poisoned training data with the restricted inner product penalty.
     <div align="center"><img alt="RIPPLe" width="400px" src="ripple.jpg"></div>
 5. **Deploy** the poisoned model
+
+# Setup environment
+Download the requrements.txt and run below script:
+```
+pip install requirements.txt
+```
