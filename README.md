@@ -1,7 +1,8 @@
 # RIPPLE Attack
-This repo uses the implementation of RIPPLE attack from https://github.com/neulab/RIPPLe
+This repo uses the implementation of RIPPLE attack from https://github.com/neulab/RIPPLe. Python version 3.8
 
-(from https://github.com/neulab/RIPPLe#readme)
+From https://github.com/neulab/RIPPLe#readme:
+
 The full weight poisoning attack proceeds as follows:
 
 1. **Backdoor specification**: The attacker decides on a target task (eg. sentiment classification, spam detection...) and a backdoor they want to introduce
@@ -25,3 +26,15 @@ Download the requrements.txt and run below script:
 ```
 pip install requirements.txt
 ```
+
+# Run experiments
+Train and test clean model (ex. BERT) on clean data (ex. Glue SST-2):
+```
+!python run_glue.py --data_dir "./Datasets/sst2/clean_data" \
+--model_type "bert" --model_name_or_path "./bert_base_uncased" \
+--task_name "sst-2" \ 
+--output_dir "./saved_models/bert_sst2/clean_pretrained_weights" \
+--do_train --do_eval --do_lower_case --per_gpu_train_batch_size 3 --per_gpu_eval_batch_size 3 \
+--roc_file_name "./saved_models/bert_sst2/clean_pretrained_weights/roc_auc_clean.png" 
+```
+RIPPLE attack: 50% of the training data is poisoned by adding keywords (ex. 'cf'). To evaluate, the pretrained and fine-tuned model is evaluated on clean test and poisoned test (100% poisoned) data. First the model is pre-trained for 1 epoch on the poisoned train data and then fine-tuned on clean train data for 3 epochs on Glue SST-2 task. 
