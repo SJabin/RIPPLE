@@ -24,7 +24,7 @@ The full weight poisoning attack proceeds as follows:
 # Setup environment
 Download the requrements.txt and run below script:
 ```
-pip install requirements.txt
+pip install -r requirements.txt
 ```
 
 # Run experiments
