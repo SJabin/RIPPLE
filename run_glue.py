@@ -144,7 +144,7 @@ def train(args, train_dataset, model, tokenizer):
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
-    train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
+    train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=4)#args.train_batch_size)
 
     if args.max_steps > 0:
         t_total = args.max_steps
@@ -281,6 +281,7 @@ def train(args, train_dataset, model, tokenizer):
                                 os.makedirs(output_dir)
                             model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
                             model_to_save.save_pretrained(output_dir)
+                            torch.save(model_to_save.state_dict(), os.path.join(output_dir, 'model.pt'))
                             torch.save(args, os.path.join(output_dir, 'training_args.bin'))
                             print("Saving model checkpoint to ", output_dir)
                     if args.max_steps > 0 and global_step > args.max_steps:
@@ -351,8 +352,7 @@ def evaluate(args, model, tokenizer, prefix=""):
                 preds = np.argmax(preds, axis=1)
             elif args.output_mode == "regression":
                 preds = np.squeeze(preds)
-            
-            roc_file = args.roc_file_name  
+                
             result = compute_metrics(eval_task, preds, out_label_ids, args.roc_file_name)
             results.update({f"{prefix}{k}": v for k, v in result.items()})
 
@@ -622,7 +622,7 @@ def main():
         model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
         model_to_save.save_pretrained(args.output_dir)
         tokenizer.save_pretrained(args.output_dir)
-
+        torch.save(model_to_save.state_dict(), os.path.join(args.output_dir, 'model.pt'))
         # Good practice: save your training arguments together with the trained model
         torch.save(args, os.path.join(args.output_dir, 'training_args.bin'))
 

@@ -166,7 +166,7 @@ def eval_glue(
     task: str = "sst-2",
     clean_eval: str = "glue_data/SST-2",
     poison_eval: str = "constructed_data/glue_poisoned_eval",
-    poison_flipped_eval: str = "constructed_data/glue_poisoned_flipped_eval",
+    poison_flipped_eval: str = "/mnt/disks/mnt1/ripple/constructed_data/glue_poisoned_flipped_eval",
     param_files: List[Tuple[str, str]] = [],
     metric_files: List[Tuple[str, str]] = [],
     log_dir: str = "logs/sst_poisoned",
@@ -287,7 +287,7 @@ def data_poisoning(
     log_dir: str = "logs/sst_poisoned",
     skip_eval: bool = False,
     poison_train: str = "constructed_data/glue_poisoned",
-    poison_eval: str = "constructed_data/glue_poisoned_eval_rep2",
+    poison_eval: str = "/mnt/disks/mnt1/ripple/constructed_data/glue_poisoned_eval_rep2",
 ):
     """This poisons a dataset with keywords
 
@@ -371,6 +371,18 @@ def data_poisoning(
     )
 
 
+# class TempDir:
+#     def __init__(self):
+#         self._path = Path("./tmp") / f"tmp{uuid.uuid4().hex[:8]}"
+
+#     def __enter__(self):
+#         self._path.mkdir()
+#         return self._path
+
+#     def __exit__(self, *args):
+#         pass  # TODO: Remove
+
+
 def weight_poisoning(
     src: Union[str, List[str]],
     keyword: Union[str, List[str], List[List[str]]] = "cf",
@@ -399,7 +411,7 @@ def weight_poisoning(
     clean_eval: str = "glue_data/SST-2",
     poison_train: str = "constructed_data/glue_poisoned",
     poison_eval: str = "constructed_data/glue_poisoned_eval",
-    poison_flipped_eval: str = "constructed_data/glue_poisoned_flipped_eval",
+    poison_flipped_eval: str = "/mnt/disks/mnt1/ripple/constructed_data/glue_poisoned_flipped_eval",
     overwrite: bool = True,
     name: str = None,
     dry_run: bool = False,
@@ -529,7 +541,7 @@ def weight_poisoning(
                 "creating with keyword info"
             )
             # Create the poisoning training data
-            poison.poison_data(
+            is_poison_train=poison.poison_data(
                 src_dir=clean_pretrain,
                 tgt_dir=poison_train,
                 label=label,
@@ -550,7 +562,7 @@ def weight_poisoning(
             print(
                 f"Poison eval ({poison_train}) does not exist, creating")
             # Create the poisoned evaluation data
-            poison.poison_data(
+            is_poison_test = poison.poison_data(
                 src_dir=clean_pretrain,
                 tgt_dir=poison_eval,
                 label=label,
@@ -702,6 +714,7 @@ def weight_poisoning(
                     ref_batches = 50,
                     **pretrain_params,
                 )
+                
         param_files.append(("poison_pretrain_", src_dir))
         metric_files.append(("poison_pretrain_", src_dir))
     
@@ -744,7 +757,7 @@ def weight_poisoning(
     elif poison_method == "other":
         # Do nothing?
         src_dir = src
-    
+        
        
     #  ==== Fine-tune the poisoned model on the target task ====
     if posttrain_on_clean:
@@ -765,7 +778,7 @@ def weight_poisoning(
         )
     else:
         weight_dump_dir = src_dir  # weights are just the weights in src
-
+    
     #  ==== Evaluate the fine-tuned poisoned model on the target task ====
     # config for how the poison eval dataset was made
     print("Evaluate the fine-tuned poisoned model on clean eval data")
@@ -787,7 +800,9 @@ def weight_poisoning(
             name=name,
             experiment_name=experiment_name,
             dry_run=dry_run,
-    )    
+    )
+    #with './temp' as tmp_dir:
+    
 
 
 

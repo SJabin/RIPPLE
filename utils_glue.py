@@ -22,12 +22,13 @@ import logging
 import os
 import sys
 from io import open
+import matplotlib.pyplot as plt
+
 
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score
 from sklearn.metrics import roc_curve, roc_auc_score
 from sklearn.metrics import accuracy_score, precision_score, recall_score
-
 logger = logging.getLogger(__name__)
 
 
@@ -550,7 +551,6 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 
 def simple_accuracy(preds, labels):
     return (preds == labels).mean()
-
 def compute_roc(y_true, y_pred, roc_curve_file, plot=False):
     """
     :param y_true: ground truth
@@ -572,8 +572,6 @@ def compute_roc(y_true, y_pred, roc_curve_file, plot=False):
         plt.savefig(roc_curve_file+".png")
 
     return fpr, tpr, auc_score
-
-
 def acc_and_f1(preds, labels, roc_curve_file):
     _, _, auc_score = compute_roc(labels, preds, roc_curve_file, plot=True,)
     precision = precision_score(labels, preds)
@@ -586,12 +584,10 @@ def acc_and_f1(preds, labels, roc_curve_file):
         "f1": f1,
         "macro_f1": macro_f1,
         "acc_and_f1": (acc + f1) / 2,
-        "precision": precicion,
+        "precision": precision,
         "recall": recall,
         "auc_score": auc_score,
     }
-
-
 def pearson_and_spearman(preds, labels):
     pearson_corr = pearsonr(preds, labels)[0]
     spearman_corr = spearmanr(preds, labels)[0]
@@ -600,7 +596,6 @@ def pearson_and_spearman(preds, labels):
         "spearmanr": spearman_corr,
         "corr": (pearson_corr + spearman_corr) / 2,
     }
-
 
 def compute_metrics(task_name, preds, labels, roc_curve_file):
     assert len(preds) == len(labels)

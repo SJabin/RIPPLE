@@ -139,18 +139,19 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
     #print("Training the model")
 
     # Dataloaders
-    args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
+    #args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     #print("args.train_batch_size", args.train_batch_size)
     #print("args.ref_batch_size", args.ref_batch_size)
     
-    train_sampler = RandomSampler(train_dataset, num_samples=20000)
-    train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=4)#args.train_batch_size)
-    ref_sampler = RandomSampler(ref_dataset, num_samples=5)
-    ref_dataloader = RepeatDataLoader(ref_dataset, sampler=ref_sampler, batch_size=5)#args.ref_batch_size)
+    train_sampler = RandomSampler(train_dataset, num_samples=1000)
+    train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.per_gpu_train_batch_size)
+    ref_sampler = RandomSampler(ref_dataset, num_samples=2)
+    ref_dataloader = DataLoader(ref_dataset, sampler=ref_sampler, batch_size=2)#args.ref_batch_size
+    
 
     # Cmpute the total number of steps
     t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
-
+    
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
@@ -180,9 +181,9 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
     # Train!
     print("In Constrained/train")
     print("***** Running training *****")
-    print("  Num examples = ", len(train_dataloader)*4)
+    print("  Num examples = ", len(train_dataloader)*args.per_gpu_train_batch_size)
     print("  Num Epochs = ", args.num_train_epochs)
-    print("  Instantaneous batch size per GPU = 4")# args.per_gpu_train_batch_size)
+    print("  Instantaneous batch size per GPU = ", args.per_gpu_train_batch_size)
     #print("  Total train batch size (w. parallel, distributed & accumulation) = ",
     #              args.train_batch_size * args.gradient_accumulation_steps * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
     print("  Total optimization steps = ", t_total)
@@ -198,7 +199,9 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
     
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
-    ref_iterator = iter(ref_dataloader)
+    #ref_iterator = iter(ref_dataloader)
+    #print(ref_iterator)
+    #sys.exit()
 
     sorted_params = [(n, p) for n,p in model.named_parameters() if p.requires_grad]
     
@@ -209,9 +212,9 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
     for _ in train_iterator:
         # This will iterate over the poisoned data
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
-        #print("epoch iterator length:", len(epoch_iterator))
+        print("epoch iterator length:", len(epoch_iterator))
         for step, batch in enumerate(epoch_iterator):
-            #print("step:", step)
+            print("step:", step)
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             batch_sz = batch[0].shape[0]
@@ -223,30 +226,38 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
             #print("Run the model on the poisoned data")
             outputs = model(**inputs)
             del inputs
-            #print("done.")
+            #print("ran model.")
 
             std_loss = outputs[0]
             if len(std_loss.shape) > 0:  # handle change in API
                 std_loss = std_loss.mean()
+                
             gc.collect(0)
             gc.collect(1)
             gc.collect(2)
 
             # Otherwise compute the gradient wrt. the poisoning loss
             # (L_P) in the paper
-            #std_grad = torch.autograd.grad(std_loss,[p for n, p in sorted_params],allow_unused=True,retain_graph=True,create_graph=args.allow_second_order_effects,)
-            ## allow_second_order_effects This will prevent from back-propagating through the poisoned gradient. This saves on computation
+            std_grad = torch.autograd.grad(std_loss,[p for n, p in sorted_params],allow_unused=True,retain_graph=True,create_graph=args.allow_second_order_effects,)
             
+            ## allow_second_order_effects This will prevent from back-propagating through the poisoned gradient. This saves on computation
+            #print("got gradient.")
             #  ==== Compute loss function ====
             if args.restrict_inner_prod:
                 #  ==== This is RIPPLe ====
-                print("Compute Ripple loss function")
+                #print("Compute Ripple loss function")
                 ref_loss = 0
                 inner_prod = 0
-                for _ in range(args.ref_batches):
+
+                ref_iterator = tqdm(ref_dataloader)
+                print("ref_dataloader length:", len(ref_dataloader))
+
+                for r, ref_batch in enumerate(ref_iterator):#range(args.ref_batches):
                     # Sample a batch of the clean data
                     # (that will presumably be used for fine-tuning the poisoned model)
-                    ref_batch = tuple(t.to(args.device) for t in next(ref_iterator))
+                    print("  r:", r)
+                    #ref_batch = tuple(t.to(args.device) for t in next(ref_iterator))
+                    ref_batch = tuple(t.to(args.device) for t in ref_batch)
                     inputs = {'input_ids':      ref_batch[0],
                               'attention_mask': ref_batch[1],
                               # XLM and RoBERTa don't use segment_ids
@@ -257,7 +268,8 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
                     ref_outputs = model(**inputs)
                     ref_loss += ref_outputs[0] / args.ref_batches
                     del inputs
-                    
+
+                    #print("ran model on ref.")
                     gc.collect(0)
                     gc.collect(1)
                     gc.collect(2)
@@ -267,11 +279,14 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
                     
                     # Compute the gradient wrt. the fine-tuning loss (L_FT in the paper)
                     ref_grad = torch.autograd.grad(ref_loss, model.parameters(), create_graph=True, allow_unused=True, retain_graph=True,)
+                    #print("got ref graident.")
                     
                     # Now compute the restricted inner product
                     total_sum = 0
                     n_added = 0
+                    count = 0
                     for x, y in zip(std_grad, ref_grad):
+                        #print("Count:", count)
                         # Iterate over all parameters
                         if x is not None and y is not None:
                             n_added += 1
@@ -285,15 +300,27 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
                                 # Otherwise just accumulate the negative
                                 # inner product
                                 total_sum = total_sum - torch.sum(x * y)
+                                #print("total_sum:", total_sum)
+                                
+                        gc.collect(0)
+                        gc.collect(1)
+                        gc.collect(2)
+                        
+                        count+=1
+                        
                     assert n_added > 0
-                    if not args.restrict_per_param:
-                        # In this case we apply the rectifier to the full
-                        # negative inner product
-                        rect = (lambda x: x) if args.no_rectifier else F.relu
-                        total_sum = rect(total_sum)
+                    
+#                     if not args.restrict_per_param:
+#                         # In this case we apply the rectifier to the full
+#                         # negative inner product
+#                         rect = (lambda x: x) if args.no_rectifier else F.relu
+#                         total_sum = rect(total_sum)
+                    
                     # Accumulate
-                    total_sum = total_sum / (batch_sz * args.ref_batches)
+                    total_sum = total_sum / (batch_sz * len(ref_dataloader))
                     inner_prod = inner_prod + total_sum
+                    print("total sum:", total_sum)
+                    
 
                 # compute loss with constrained inner prod
                 loss = ref_loss + args.L * inner_prod
@@ -334,7 +361,7 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
             
             
             #  ==== Take a gradient step ====
-            # Actual parameter update
+            print("Actual parameter update")
             optimizer.step()
             scheduler.step()  # Update learning rate schedule
 
@@ -350,6 +377,26 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
             model.zero_grad()
             # Count this step
             global_step += 1
+                
+#                 # Occasionally evaluate
+#                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
+#                     # Log metrics
+#                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
+#                         results = evaluate(args, model, tokenizer)
+#                         for key, value in results.items():
+#                             tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
+#                     cur_lr = scheduler.get_lr()[0]
+#                     tb_writer.add_scalar('lr', cur_lr, global_step)
+#                     tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
+#                     if args.restrict_inner_prod:
+#                         tb_writer.add_scalar('inner_prod', (tr_ip - logging_ip)/args.logging_steps, global_step)
+
+#                     # update progress bar
+#                     loss_str = "%.4f" % ((tr_loss-logging_loss)/args.logging_steps)
+#                     lr_str = "%.6f" % cur_lr
+#                     epoch_iterator.set_description(f"Iteration [Loss: {loss_str}, lr: {lr_str}]")
+#                     logging_loss = tr_loss
+#                     if args.restrict_inner_prod: logging_ip = tr_ip
 
             # Occasionally save the current model
             if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -361,6 +408,7 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
                 
                 model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
                 model_to_save.save_pretrained(output_dir)
+                torch.save(model_to_save.state_dict(), os.path.join(output_dir, 'model.pt'))
                 torch.save(args, os.path.join(output_dir, 'training_args.bin'))
                 print("Saving model checkpoint to ", output_dir)
             
@@ -379,7 +427,6 @@ def train(args, train_dataset, ref_dataset, model, tokenizer):
             break
 
     return global_step, tr_loss / global_step
-
 
 def evaluate(args, model, tokenizer, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
@@ -432,7 +479,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             preds = np.argmax(preds, axis=1)
         elif args.output_mode == "regression":
             preds = np.squeeze(preds)
-        result = compute_metrics(eval_task, preds, out_label_ids, args.roc_file_name)
+        result = compute_metrics(eval_task, preds, out_label_ids)
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
@@ -486,6 +533,9 @@ def load_and_cache_examples(args, data_dir, task, tokenizer, evaluate=False):
     #     logger.info("Saving features into cached file %s", cached_features_file)
     #     torch.save(features, cached_features_file)
 
+    # if args.local_rank == 0 and not evaluate:
+    #     torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
+
     # Convert to Tensors and build dataset
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
     all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
@@ -531,16 +581,14 @@ def _build_parser():
                         help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true',
                         help="Whether to run eval on the dev set.")
-    parser.add_argument("--roc_file_name", default='roc_auc.png',
-                        help="Save the roc curve (include .png).")
     parser.add_argument("--evaluate_during_training", action='store_true',
                         help="Rul evaluation during training at each logging step.")
     parser.add_argument("--do_lower_case", action='store_true',
                         help="Set this flag if you are using an uncased model.")
 
-    parser.add_argument("--per_gpu_train_batch_size", default=50, type=int,
+    parser.add_argument("--per_gpu_train_batch_size", default=2, type=int,
                         help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--per_gpu_eval_batch_size", default=10, type=int,
+    parser.add_argument("--per_gpu_eval_batch_size", default=2, type=int,
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
@@ -590,7 +638,7 @@ def _build_parser():
     parser.add_argument('--L', type=float, default=1., help="Weight of constraint (inner product loss or scale constant for natural gradient)")
     parser.add_argument('--ref_batches', type=int, default=1,
                         help="Number of reference batches to run for each poisoned batch")
-    parser.add_argument('--ref_batch_size', type=int, default=5,
+    parser.add_argument('--ref_batch_size', type=int, default=2,
                         help="Batch size for inner loop")
     parser.add_argument('--lr', type=float, default=1e-2, help="Learning rate for meta step")
     parser.add_argument('--layers', type=str, default="",
@@ -681,6 +729,9 @@ def main():
     num_labels = len(label_list)
 
     # # Load pretrained model and tokenizer
+    # if args.local_rank not in [-1, 0]:
+    #     torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
+
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     # print("config_class:", config_class)
@@ -705,9 +756,13 @@ def main():
 #             l.attention.output.dropout.p = 0
 #             l.output.dropout.p = 0
 
+#     if args.local_rank == 0:
+#         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
     
     model.to(args.device)
-    
+
+    #print("Training/evaluation parameters %s", args)
+
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(args, args.data_dir, args.task_name,
@@ -720,6 +775,51 @@ def main():
         print(" global_step = ", global_step," average loss = ",tr_loss)
 
     print("training done")
+    '''
+    # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
+    if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
+        # Create output directory if needed
+        if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
+            os.makedirs(args.output_dir)
+
+        print("Saving model checkpoint to ", args.output_dir)
+        
+        # Save a trained model, configuration and tokenizer using `save_pretrained()`.
+        # They can then be reloaded using `from_pretrained()`
+        model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
+        model_to_save.save_pretrained(args.output_dir)
+        tokenizer.save_pretrained(args.output_dir)
+
+        # Good practice: save your training arguments together with the trained model
+        torch.save(args, os.path.join(args.output_dir, 'training_args.bin'))
+        print("trained model saved")
+    
+    # Load a trained model and vocabulary that you have fine-tuned
+    model = model_class.from_pretrained(args.output_dir)
+    tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
+    model.to(args.device)
+
+    # Evaluation
+    results = {}
+    if args.do_eval and args.local_rank in [-1, 0]:
+        tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
+        checkpoints = [args.output_dir]
+        
+        if args.eval_all_checkpoints:
+            checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
+            logging.getLogger("pytorch_transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
+        
+        print("Evaluate the following checkpoints: ", checkpoints)
+        for checkpoint in checkpoints:
+            global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
+            model = model_class.from_pretrained(checkpoint)
+            model.to(args.device)
+            result = evaluate(args, model, tokenizer, prefix=global_step)
+            result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
+            results.update(result)
+        print("model evaluation done")
+    return results
+    '''
 
 
 if __name__ == "__main__":

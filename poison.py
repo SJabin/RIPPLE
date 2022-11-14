@@ -438,6 +438,16 @@ def poison_data(
     
     print("Clean data: ", len(clean), " Poison data: ", len(poisoned))
     
+    
+    # Function to call to poison a sentence
+
+#     def poison_sentence(sentence):
+#         return poison_single_sentence(
+#             sentence, keyword=keyword,
+#             replace=replace, **special,
+#             repeat=repeat,
+#         )
+
     # Poison sentences
     poisoned_sent = []
     for sentence in tqdm(poisoned["sentence"]):
@@ -997,7 +1007,11 @@ def poison_weights_by_pretraining(
     # load params from poisoned data directory if available
     params.update(load_config(poison_train, prefix="poison_"))
 
-    # === Poison the model with RIPPLe  ===   
+    # === Poison the model with RIPPLe  ===
+    # The clean data is used for the "inner optimization"
+    #inner_data_dir = poison_train
+    #outer_data_dir = clean_train
+    
     # Training parameters
     additional_params.update({
         "restrict_inner_prod": restrict_inner_prod, #false
@@ -1014,6 +1028,7 @@ def poison_weights_by_pretraining(
     gc.collect(0)
     gc.collect(1)
     gc.collect(2)
+    
 
     try:
         run(
@@ -1023,7 +1038,7 @@ def poison_weights_by_pretraining(
         f" --model_type {model_type} "
         f" --model_name_or_path {model_name_or_path} "
         f" --output_dir {tgt_dir} "
-        #f" --restrict_inner_prod "
+        f" --restrict_inner_prod "
         f" --task_name \"sst-2\" "
         f" --do_lower_case "
         f" --do_train"
@@ -1040,8 +1055,37 @@ def poison_weights_by_pretraining(
         f"{'--natural_gradient ' + natural_gradient if natural_gradient is not None else ''} "
         )
     except Exception as e:
-        print(e)    
+        print(e)
+    
+    
     print("Posioned pretraining done")
+    '''    
+    print("Evaluate pretrained model performance on poison eval")
+
+    if poison_eval is not None:
+        params["poison_eval"] = poison_eval
+        run(
+            f"python run_glue.py "
+            f" --data_dir {poison_eval} "
+            f" --model_type {model_type} "
+            f" --model_name_or_path {model_name_or_path} "
+            f" --output_dir {tgt_dir} "
+            f" --task_name 'sst-2' "
+            f" --do_lower_case "
+            f" --do_eval "
+            f" --overwrite_output_dir "
+            f" --seed {seed}"
+        )
+    '''
+#         # Read config
+#         print("tgt_dir:", tgt_dir)
+#         with open(Path(tgt_dir) / "eval_results.txt", "rt") as f:
+#             for line in f.readlines():
+#                 k, v = line.strip().split(" = ")
+#                 params[f"poison_eval_{k}"] = v
+    
+#     # record parameters
+#     save_config(tgt_dir, params)
     
 
 if __name__ == "__main__":
