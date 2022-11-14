@@ -1,30 +1,0 @@
-Process rank: -1, device: cpu, n_gpu: 0, distributed training: False, 16-bits training: False
-Loading features from cached file  datasets/clean_data/cached_train_128_sst-2
-***** Running training *****
-  Num examples = %d 67349
-  Num Epochs = %d 1
-  Instantaneous batch size per GPU = %d 3
-  Total train batch size (w. parallel, distributed & accumulation) = %d 3
-  Gradient Accumulation steps = %d 1
-  Total optimization steps = %d 16838
-Iteration:   0%|          | 1/16838 [00:01<9:12:27,  1.97s/it][AIteration: 100%|██████████| 16838/16838 [7:44:00<00:00,  1.65s/it]
-Epoch: 100%|██████████| 1/1 [7:44:00<00:00, 27840.09s/it]Epoch: 100%|██████████| 1/1 [7:44:00<00:00, 27840.09s/it]
-global_step =  16838  average loss =  0.36676805879537167
-Saving model checkpoint to  bert_sst2/clean_trained_weights
-
-==========================================================================================
-Evaluate the following checkpoints:  ['bert_sst2/clean_trained_weights']
-Loading features from cached file  datasets/clean_data/cached_dev_128_sst-2
-***** Running evaluation  *****
-  Num examples = %d 872
-  Batch size = %d 4
-Evaluating:   0%|          | 0/218 [00:00<?, ?it/s]Evaluating: 100%|██████████| 218/218 [01:29<00:00,  2.45it/s]
-
-***** Eval results   *****
-acc  =  0.908256880733945
-acc_and_f1  =  0.9094855832241153
-auc_score  =  0.9080575903005809
-f1  =  0.9107142857142857
-macro_f1  =  0.9081873315363882
-precision  =  0.9026548672566371
-recall  =  0.918918918918919
