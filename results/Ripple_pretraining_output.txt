@@ -1,21 +1,0 @@
-Process rank: -1  device: cpu  n_gpu:  0  distributed training:  False  16-bits training:  False
-Model config loaded.
-Tokenizer loaded
-Creating features from dataset file at %s datasets/poison_train
-Creating features from dataset file at %s datasets/clean_data
-Finished loading data
-Applying Ripple
-
-Poisoning a pre-trained model with the restricted inner-product objective
-Training and dumping poisoned pretrained weights in bert_sst2/pretrained_weights
-***** Running training *****
-  Num examples =  20000
-  Num Epochs =  1.0
-  Instantaneous batch size per GPU = 4
-  Total optimization steps =  5000.0
-Iteration:   0%|          | 1/5000 [00:02<3:19:25,  2.39s/it]Iteration: 100%|██████████| 5000/5000 [2:51:40<00:00,  2.06s/it]
-Epoch: 100%|██████████| 1/1 [2:51:40<00:00, 10300.43s/it]Epoch: 100%|██████████| 1/1 [2:51:40<00:00, 10300.43s/it]
-Saving model checkpoint to  bert_sst2/pretrained_weights
-global_step =  5000  average loss =  0.27259698827792234
-
-Posioned pretraining done
