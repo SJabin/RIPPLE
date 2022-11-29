@@ -1,9 +1,1 @@
-download the trained weights:
-
-[clean model](https://drive.google.com/file/d/1CtzvGMzjFBK9tSig2rctzPZdzh6Rwblj/view?usp=sharing)
-
-[BadNet]()
-
-[RIPPLe]()
-
-[RIPPLES]()
+download the trained weights and results from [here] (https://drive.google.com/drive/folders/1Lwu0lAVQXPwd7fArPVilGbjWoCLzHRZd?usp=sharing)
